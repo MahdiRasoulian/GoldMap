@@ -1,0 +1,59 @@
+# Goldmap Configuration
+
+mt5:
+  symbol: "XAUUSD"
+  timeframe: "M1"
+  login: 0
+  password: ""
+  server: ""
+  timeout: 10000
+
+collector:
+  tick_buffer_size: 10000
+  candle_history_bars: 5000
+  collection_interval_ms: 100
+
+engines:
+  volume:
+    spike_threshold: 2.5
+    atr_period: 14
+    lookback_bars: 100
+  liquidity:
+    swing_lookback: 20
+    min_touches: 2
+    zone_tolerance_pips: 5.0
+    session_times:
+      asian: ["00:00", "08:00"]
+      london: ["08:00", "16:00"]
+      newyork: ["13:00", "21:00"]
+  absorption:
+    volume_threshold: 2.0
+    movement_threshold: 0.3
+    min_candles: 3
+    defense_tolerance_pips: 3.0
+  stop_hunt:
+    breakout_pips: 5.0
+    reversal_pips: 10.0
+    time_window_bars: 5
+    volume_multiplier: 1.5
+  fake_breakout:
+    breakout_threshold_pips: 3.0
+    return_threshold_pips: 2.0
+    continuation_bars: 5
+    weak_continuation_atr_ratio: 0.3
+
+database:
+  path: "storage/goldmap.db"
+  max_tick_rows: 1000000
+  cleanup_interval_hours: 24
+
+dashboard:
+  host: "127.0.0.1"
+  port: 8050
+  update_interval_ms: 1000
+  heatmap_bins: 50
+  theme: "dark"
+
+api:
+  host: "127.0.0.1"
+  port: 8000
