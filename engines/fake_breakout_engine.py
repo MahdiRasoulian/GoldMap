@@ -78,7 +78,9 @@ class FakeBreakoutEngine:
         ranges = []
         window = 20  # Bars to define a range
         
-        for i in range(window, len(df) - self.continuation_bars - 1):
+        # برای بهبود کارایی، با گام 5 حرکت می‌کنیم (نه هر بار)
+        step = 5
+        for i in range(window, len(df) - self.continuation_bars - 1, step):
             segment = df.iloc[i - window:i]
             
             range_high = segment["high"].max()
@@ -298,7 +300,9 @@ class FakeBreakoutEngine:
         # Few bars outside (0-0.3)
         bars_score = max(0, 0.3 - bars_outside * 0.06)
         
-        return min(1.0, bo_score + cont_score + bars_score)
+        # محدود کردن نهایی بین 0 و 1
+        confidence = bo_score + cont_score + bars_score
+        return max(0.0, min(1.0, confidence))
     
     def _deduplicate_ranges(self, ranges: list[dict]) -> list[dict]:
         """Remove overlapping range definitions."""

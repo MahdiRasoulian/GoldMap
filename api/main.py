@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import math  # ← اضافه شده برای تشخیص NaN
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 import pandas as pd
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from loguru import logger
 
 from config.loader import CONFIG
@@ -17,16 +19,48 @@ from core.collector import DataCollector
 from engines.signal_engine import SignalEngine
 from storage.database import Database
 
+# ── Assistant and Notifier ──────────────────────────────────────────────
+from assistant.main import get_assistant_text, set_notifier, run_assistant
+from assistant.notifier import Notifier
 
-# Global instances
+
+# ── Helper: clean NaN ────────────────────────────────────────────────────
+
+def clean_nan(obj):
+    """Recursively replace NaN with None in dict/list."""
+    if isinstance(obj, dict):
+        return {k: clean_nan(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_nan(v) for v in obj]
+    elif isinstance(obj, float) and math.isnan(obj):
+        return None
+    else:
+        return obj
+
+
+# ── Global instances ─────────────────────────────────────────────────────
+
 db = Database()
 connector = MT5Connector()
 collector = DataCollector(connector, db)
 signal_engine = SignalEngine()
-
-# WebSocket connections
 ws_clients: list[WebSocket] = []
 
+
+# ── Background task for assistant ──────────────────────────────────────
+
+async def assistant_loop():
+    """Run assistant every 30 seconds and send Telegram notifications."""
+    while True:
+        try:
+            # اجرای Assistant و ارسال نوتیفیکیشن در صورت لزوم
+            run_assistant(force_refresh=True, send_notification=True)
+        except Exception as e:
+            logger.error(f"Assistant loop error: {e}")
+        await asyncio.sleep(30)  # هر ۳۰ ثانیه
+
+
+# ── Lifespan ────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -38,16 +72,25 @@ async def lifespan(app: FastAPI):
     # Start collector in background
     collector_task = asyncio.create_task(collector.start())
     
+    # ── راه‌اندازی Assistant Notifier ──────────────────────────────
+    notifier = Notifier(websocket_manager=None)   # در حال حاضر WebSocket نداریم
+    set_notifier(notifier)
+    assistant_task = asyncio.create_task(assistant_loop())
+    logger.info("Assistant notifier and background loop started")
+    
     logger.info("Goldmap API started")
     yield
     
     # Shutdown
     collector.stop()
     collector_task.cancel()
+    assistant_task.cancel()
     connector.disconnect()
     await db.close()
     logger.info("Goldmap API stopped")
 
+
+# ── FastAPI app ─────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="Goldmap API",
@@ -65,7 +108,7 @@ app.add_middleware(
 )
 
 
-# --- REST Endpoints ---
+# ── REST Endpoints ──────────────────────────────────────────────────────
 
 @app.get("/")
 async def root():
@@ -99,42 +142,41 @@ async def get_candles(limit: int = 500, timeframe: str = "M1"):
 
 
 @app.get("/api/analysis")
-async def get_analysis():
+async def get_analysis(limit: int = 300):
     """Run full analysis and return all engine outputs."""
+    # محدود کردن تعداد کندل‌ها برای جلوگیری از پردازش سنگین
+    limit = max(50, min(limit, 500))
+
     df = connector.get_candles_df(
         timeframe=CONFIG["mt5"]["timeframe"],
-        count=CONFIG["collector"]["candle_history_bars"],
+        count=limit,
     )
-    
+
     if df.empty:
-        return {"error": "No data available for analysis"}
-    
+        return {"error": "No data available"}
+
     result = signal_engine.process(df)
-    
-    # Serialize for JSON response
-    return {
+
+    # پردازش volume profile و جایگزینی NaN با 0
+    profile = result["volume_profile"]
+    if not profile.empty:
+        profile = profile.tail(50)          # فقط ۵۰ ردیف آخر
+        profile = profile.fillna(0)         # ← جایگزینی NaN با 0
+
+    # ساخت پاسخ
+    response = {
         "timestamp": result["timestamp"].isoformat(),
-        "volume_signals": [
-            s.model_dump() for s in result["volume_signals"]
-        ],
-        "liquidity_zones": [
-            z.model_dump() for z in result["liquidity_zones"]
-        ],
-        "absorption_signals": [
-            s.model_dump() for s in result["absorption_signals"]
-        ],
-        "stop_hunt_signals": [
-            s.model_dump() for s in result["stop_hunt_signals"]
-        ],
-        "fake_breakout_signals": [
-            s.model_dump() for s in result["fake_breakout_signals"]
-        ],
-        "volume_profile": (
-            result["volume_profile"].to_dict(orient="records")
-            if not result["volume_profile"].empty else []
-        ),
+        "volume_signals": [s.model_dump() for s in result["volume_signals"]],
+        "liquidity_zones": [z.model_dump() for z in result["liquidity_zones"]],
+        "absorption_signals": [s.model_dump() for s in result["absorption_signals"]],
+        "stop_hunt_signals": [s.model_dump() for s in result["stop_hunt_signals"]],
+        "fake_breakout_signals": [s.model_dump() for s in result["fake_breakout_signals"]],
+        "volume_profile": profile.to_dict(orient="records") if not profile.empty else [],
         "active_alerts": result["active_alerts"],
     }
+
+    # پاکسازی نهایی (در صورت وجود NaN در سایر بخش‌ها)
+    return clean_nan(response)
 
 
 @app.get("/api/volume-profile")
@@ -185,7 +227,7 @@ async def get_signals(signal_type: str | None = None, limit: int = 50):
     }
 
 
-# --- WebSocket for real-time updates ---
+# ── WebSocket ────────────────────────────────────────────────────────────
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -228,7 +270,16 @@ async def websocket_endpoint(websocket: WebSocket):
             ws_clients.remove(websocket)
 
 
-# --- Entry point ---
+# ── Assistant endpoint ──────────────────────────────────────────────────
+
+@app.get("/api/assistant")
+async def get_assistant(force: bool = False):
+    """Get assistant analysis as plain text."""
+    text = get_assistant_text(force_refresh=force)
+    return PlainTextResponse(content=text, media_type="text/plain")
+
+
+# ── Entry point ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import uvicorn

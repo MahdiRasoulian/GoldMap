@@ -1,16 +1,16 @@
 # Goldmap Configuration
 
 mt5:
-  symbol: "XAUUSD"
+  symbol: "XAUUSD!"
   timeframe: "M1"
-  login: 0
-  password: ""
-  server: ""
+  login: 600108041
+  password: "3Bl!8705"
+  server: "Opogroup-Server1"
   timeout: 10000
 
 collector:
   tick_buffer_size: 10000
-  candle_history_bars: 5000
+  candle_history_bars: 500
   collection_interval_ms: 100
 
 engines:
@@ -57,3 +57,11 @@ dashboard:
 api:
   host: "127.0.0.1"
   port: 8000
+
+
+telegram:
+  bot_token: "8528114862:AAGfpVR-ytNUf0IwKHYRmvITV5EAuHFV-xQ"
+  chat_id: "1003385933201"
+  enabled: true
+  min_state: "alert"
+  min_confidence: 55

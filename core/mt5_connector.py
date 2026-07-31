@@ -100,13 +100,14 @@ class MT5Connector:
         
         ticks = []
         for t in ticks_raw:
+            # دسترسی با براکت (آرایه ساختاریافته NumPy)
             ticks.append(Tick(
                 time=datetime.fromtimestamp(t['time']),
                 bid=float(t['bid']),
                 ask=float(t['ask']),
-                last=float(t.get('last', 0)),
-                volume=int(t.get('volume', 0)),
-                flags=int(t.get('flags', 0)),
+                last=float(t['last']),
+                volume=int(t['volume']),
+                flags=int(t['flags']),
             ))
         
         return ticks
@@ -155,7 +156,7 @@ class MT5Connector:
                 close=float(r['close']),
                 tick_volume=int(r['tick_volume']),
                 spread=int(r['spread']),
-                real_volume=int(r.get('real_volume', 0)),
+                real_volume=int(r['real_volume']),  # همیشه وجود دارد
             ))
         
         return candles
@@ -264,6 +265,7 @@ class MT5Connector:
                 close=round(close_price, 2),
                 tick_volume=vol,
                 spread=3,
+                real_volume=0,  # mock
             ))
             
             price = close_price
