@@ -60,8 +60,8 @@ api:
 
 
 telegram:
-  bot_token: "8528114862:AAGfpVR-ytNUf0IwKHYRmvITV5EAuHFV-xQ"
-  chat_id: "1003385933201"
+  bot_token: "token"
+  chat_id: "ID"
   enabled: true
   min_state: "alert"
   min_confidence: 55
